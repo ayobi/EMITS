@@ -1,0 +1,42 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data files (too large for git)
+data/
+*.fastq
+*.fastq.gz
+*.fasta
+*.fasta.gz
+*.fa
+*.fa.gz
+*.paf
+*.bam
+*.sam
+
+# UNITE database
+*.mmi
+
+# Results (regenerable)
+results/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Figures (regenerable from scripts)
+figures/*.png
