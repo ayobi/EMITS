@@ -1,21 +1,14 @@
-# EMITS
-
-**Expectation-Maximization abundance estimation for fungal ITS communities from long-read sequencing**
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Rust](https://img.shields.io/badge/Rust-1.70%2B-orange.svg)](https://www.rust-lang.org/)
-
 EMITS applies expectation-maximization (EM) to resolve ambiguous read-to-reference mappings in fungal ITS amplicon sequencing, producing probabilistic species-level abundance estimates from minimap2 alignments against the [UNITE](https://unite.ut.ee) database.
 
 ## Why EMITS?
 
-Naive best-hit classification assigns each read entirely to its top-scoring reference. This fails when closely related species share similar ITS sequences — the "best hit" isn't always the correct one, especially with ONT sequencing noise. EMITS iteratively refines abundance estimates by considering *all* candidate alignments for each read, using community-level priors to resolve ambiguity.
+Naive best-hit classification assigns each read entirely to its top-scoring reference. This fails when closely related species share similar ITS sequences, the "best hit" isn't always the correct one, especially with ONT sequencing noise. EMITS iteratively refines abundance estimates by considering *all* candidate alignments for each read, using community-level priors to resolve ambiguity.
 
 **Key results:**
 - **77–91% reduction** in L1 error under realistic alignment noise (simulations)
 - **Correct within-genus species resolution** on the ONT ATCC fungal mock community (*Trichophyton*, *Penicillium*, *Aspergillus*)
 - **54% reduction** in false positive species calls on a 21-species synthetic community
-- **Accession consolidation** — resolves UNITE database redundancy (e.g., 13 entries for *N. glabratus*)
+- **Accession consolidation**, resolves UNITE database redundancy (e.g., 13 entries for *N. glabratus*)
 
 ## Installation
 
@@ -184,16 +177,6 @@ All 10 expected genera detected (99.95% abundance in expected taxa). EM resolves
 - Overall L1: EM 7.48% vs naive 8.64% (**13.4% improvement**)
 - False positives: EM 0.46% vs naive 1.01% (**54% reduction**)
 - R²: EM 0.977 vs naive 0.970
-
-## Citation
-
-If you use EMITS in your research, please cite:
-
-> O'Brien A, Lagos C, Fernández K, Ojeda B, Parada P (2026). EMITS: expectation-maximization abundance estimation for fungal ITS communities from long-read sequencing. *bioRxiv*. doi: [forthcoming]
-
-Related tool:
-
-> O'Brien A, Lagos C, Fernández K, Ojeda B, Parada P (2026). ITSxRust: ITS region extraction with partial-chain recovery and structured diagnostics for long-read amplicon sequencing. *bioRxiv*. doi: [10.64898/2026.02.25.707950](https://doi.org/10.64898/2026.02.25.707950)
 
 ## License
 
