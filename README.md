@@ -6,6 +6,8 @@
 [![GitHub release](https://img.shields.io/github/v/release/ayobi/emits)](https://github.com/ayobi/emits/releases)
 [![Docker Image](https://img.shields.io/badge/Docker-ghcr.io%2Fayobi%2Femits-blue?logo=docker)](https://ghcr.io/ayobi/emits)
 
+Expectation-Maximization abundance estimation for fungal ITS communities from long-read sequencing
+
 EMITS applies expectation-maximization (EM) to resolve ambiguous read-to-reference mappings in fungal ITS amplicon sequencing, producing probabilistic species-level abundance estimates from minimap2 alignments against the [UNITE](https://unite.ut.ee) database.
 
 ## Why EMITS?
