@@ -1,3 +1,11 @@
+# EMITS
+[![CI](https://github.com/ayobi/emits/actions/workflows/ci.yml/badge.svg)](https://github.com/ayobi/emits/actions/workflows/ci.yml)
+[![Release](https://github.com/ayobi/emits/actions/workflows/release.yml/badge.svg)](https://github.com/ayobi/emits/actions/workflows/release.yml)
+[![Docker](https://github.com/ayobi/emits/actions/workflows/docker.yml/badge.svg)](https://github.com/ayobi/emits/actions/workflows/docker.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![GitHub release](https://img.shields.io/github/v/release/ayobi/emits)](https://github.com/ayobi/emits/releases)
+[![Docker Image](https://img.shields.io/badge/Docker-ghcr.io%2Fayobi%2Femits-blue?logo=docker)](https://ghcr.io/ayobi/emits)
+
 EMITS applies expectation-maximization (EM) to resolve ambiguous read-to-reference mappings in fungal ITS amplicon sequencing, producing probabilistic species-level abundance estimates from minimap2 alignments against the [UNITE](https://unite.ut.ee) database.
 
 ## Why EMITS?
