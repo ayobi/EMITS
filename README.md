@@ -1,4 +1,6 @@
 # EMITS
+[![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat)](http://bioconda.github.io/recipes/emits/README.html)
+[![bioconda downloads](https://img.shields.io/conda/dn/bioconda/emits.svg?label=bioconda%20downloads)](https://anaconda.org/bioconda/emits)
 [![CI](https://github.com/ayobi/emits/actions/workflows/ci.yml/badge.svg)](https://github.com/ayobi/emits/actions/workflows/ci.yml)
 [![Release](https://github.com/ayobi/emits/actions/workflows/release.yml/badge.svg)](https://github.com/ayobi/emits/actions/workflows/release.yml)
 [![Docker](https://github.com/ayobi/emits/actions/workflows/docker.yml/badge.svg)](https://github.com/ayobi/emits/actions/workflows/docker.yml)
