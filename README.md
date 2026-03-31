@@ -24,19 +24,19 @@ Naive best-hit classification assigns each read entirely to its top-scoring refe
 
 ## Installation
 
-### From source (recommended)
+### Bioconda (recommended)
+
+```bash
+conda install -c bioconda emits
+```
+
+### From source
 
 ```bash
 git clone https://github.com/ayobi/emits.git
 cd emits
 cargo build --release
 # Binary at target/release/emits
-```
-
-### Bioconda
-
-```bash
-conda install -c bioconda emits
 ```
 
 ## Quick start
