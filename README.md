@@ -33,7 +33,7 @@ cargo build --release
 # Binary at target/release/emits
 ```
 
-### Bioconda (planned)
+### Bioconda
 
 ```bash
 conda install -c bioconda emits
