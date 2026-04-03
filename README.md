@@ -6,6 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![GitHub release](https://img.shields.io/github/v/release/ayobi/emits)](https://github.com/ayobi/emits/releases)
 [![Docker Image](https://img.shields.io/badge/Docker-ghcr.io%2Fayobi%2Femits-blue?logo=docker)](https://ghcr.io/ayobi/emits)
+[![bioRxiv](https://img.shields.io/badge/bioRxiv-10.64898%2F2026.03.31.715662-B31B1B)](https://doi.org/10.64898/2026.03.31.715662)
 
 Expectation-Maximization abundance estimation for fungal ITS communities from long-read sequencing
 
