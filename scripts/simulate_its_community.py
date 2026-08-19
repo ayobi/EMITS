@@ -6,7 +6,7 @@ Workflow:
 1. Search UNITE FASTA for target species, pick one representative per species
 2. Use badread to simulate ONT reads with realistic error profiles
 3. Combine into a single FASTQ with known ground truth
-4. Ready to align with minimap2 → run EMU-ITS
+4. Ready to align with minimap2 → run EMITS
 
 Usage:
     python simulate_its_community.py \
@@ -151,10 +151,75 @@ def write_ground_truth(community, total_reads, outpath):
     print(f"  Wrote ground truth to {outpath}")
 
 
-def simulate_reads_badread(representatives, community, total_reads, outdir, seed=42):
+# Read-accuracy profiles per sequencing platform.
+#
+# R1 (revision) asked for PacBio benchmarking. EMITS ships a tuned
+# `pacbio-hifi` preset, so the simulated community must be regenerable at HiFi
+# accuracy to test it.
+#
+# Requires badread >= 0.4.0. `--identity` accepts two forms:
+#   THREE values -> beta distribution over percent identity (mean, max, stdev)
+#   TWO   values -> normal distribution over qscores (mean, stdev)
+# The qscore form is the one badread documents for high-accuracy reads
+# (ONT duplex, PacBio HiFi); the beta form is poorly behaved near 100%.
+#
+# ont-r10 is left EXACTLY as published so the existing ONT simulation still
+# reproduces bit-for-bit. Do not change it.
+PLATFORM_PROFILES = {
+    "ont-r10": {
+        "badread_identity": "92,98,4",      # percent-identity form
+        "error_model": "random",
+        "qscore_model": "nanopore2020",
+        "simple_mean": 0.95,
+        "simple_sd": 0.02,
+        "simple_floor": 0.85,
+        "simple_ceil": 0.99,
+        "label": "ONT R10.4.1 (~Q20), random error model",
+        "minimap2_preset": "map-ont",
+        "minimap2_p": "0.9",
+        "emits_preset": "ont-r10",
+    },
+    # Headline HiFi condition: error and qscore models trained on real PacBio
+    # HiFi reads, so this reproduces HiFi error *structure* (substitution-
+    # dominant), not merely HiFi accuracy.
+    "pacbio-hifi": {
+        "badread_identity": "27,3",         # qscore form: mean Q27 (~99.8%), sd 3
+        "error_model": "pacbio2021",
+        "qscore_model": "pacbio2021",
+        "simple_mean": 0.998,
+        "simple_sd": 0.002,
+        "simple_floor": 0.990,
+        "simple_ceil": 1.0,
+        "label": "PacBio HiFi (~Q27, pacbio2021 models)",
+        "minimap2_preset": "map-hifi",
+        "minimap2_p": "0.95",
+        "emits_preset": "pacbio-hifi",
+    },
+    # Control: HiFi accuracy with the SAME random error model as the ONT run.
+    # Use this if you want to compare across platforms, so that any difference
+    # is attributable to read accuracy rather than to the error model.
+    "pacbio-hifi-random": {
+        "badread_identity": "27,3",
+        "error_model": "random",
+        "qscore_model": "nanopore2020",
+        "simple_mean": 0.998,
+        "simple_sd": 0.002,
+        "simple_floor": 0.990,
+        "simple_ceil": 1.0,
+        "label": "PacBio HiFi accuracy, random error model (control)",
+        "minimap2_preset": "map-hifi",
+        "minimap2_p": "0.95",
+        "emits_preset": "pacbio-hifi",
+    },
+}
+
+
+def simulate_reads_badread(representatives, community, total_reads, outdir,
+                           seed=42, platform="ont-r10"):
     """
-    Simulate ONT reads using badread for each species proportionally.
+    Simulate reads using badread for each species proportionally.
     """
+    profile = PLATFORM_PROFILES[platform]
     combined_fastq = os.path.join(outdir, "simulated_community.fastq")
     read_origin = os.path.join(outdir, "read_origins.tsv")
     
@@ -184,10 +249,10 @@ def simulate_reads_badread(representatives, community, total_reads, outdir, seed
             "badread", "simulate",
             "--reference", tmp_fasta,
             "--quantity", str(quantity),
-            "--identity", "92,98,4",  # ONT R10.4.1 typical: mean 95%, sd ~3%
+            "--identity", profile["badread_identity"],
             "--length", f"{len(seq)},{int(len(seq)*0.2)}",  # mean=reflen, sd=20%
-            "--error_model", "random",  # random errors (no specific model needed)
-            "--qscore_model", "nanopore2020",
+            "--error_model", profile["error_model"],
+            "--qscore_model", profile["qscore_model"],
             "--seed", str(seed),
             "--start_adapter_seq", "",
             "--end_adapter_seq", "",
@@ -221,7 +286,7 @@ def simulate_reads_badread(representatives, community, total_reads, outdir, seed
             # Fall back to simple simulation
             print(f"  Using simple simulation fallback for {species}")
             for j in range(n_reads):
-                mutated = simple_simulate_read(seq, identity=0.95, seed=seed+j)
+                mutated = simple_simulate_read(seq, identity=profile["simple_mean"], seed=seed+j)
                 read_id = f"@sim_{species.replace(' ', '_')}_{j}"
                 qual = "I" * len(mutated)  # placeholder quality
                 all_reads.append(f"{read_id}\n{mutated}\n+\n{qual}\n")
@@ -276,11 +341,13 @@ def simple_simulate_read(seq, identity=0.95, seed=0):
     return "".join(result)
 
 
-def simulate_simple(representatives, community, total_reads, outdir, seed=42):
+def simulate_simple(representatives, community, total_reads, outdir, seed=42,
+                    platform="ont-r10"):
     """
     Simple simulation without badread — introduce random errors directly.
     Use this if badread is not installed.
     """
+    profile = PLATFORM_PROFILES[platform]
     combined_fastq = os.path.join(outdir, "simulated_community.fastq")
     read_origin = os.path.join(outdir, "read_origins.tsv")
     
@@ -300,9 +367,8 @@ def simulate_simple(representatives, community, total_reads, outdir, seed=42):
             trim_end = rng.randint(0, max(0, int(len(seq) * 0.05)))
             subseq = seq[trim_start:len(seq)-trim_end] if trim_end > 0 else seq[trim_start:]
             
-            # Simulate with ~92-98% identity (ONT R10 range)
-            identity = rng.gauss(0.95, 0.02)
-            identity = max(0.85, min(0.99, identity))
+            identity = rng.gauss(profile["simple_mean"], profile["simple_sd"])
+            identity = max(profile["simple_floor"], min(profile["simple_ceil"], identity))
             
             mutated = simple_simulate_read(subseq, identity=identity, seed=seed+j*1000+hash(species)%10000)
             
@@ -311,7 +377,8 @@ def simulate_simple(representatives, community, total_reads, outdir, seed=42):
             all_reads.append(f"{read_id}\n{mutated}\n+\n{qual}\n")
             origins.append(f"{read_id[1:]}\t{species}\n")
         
-        print(f"  {species}: {n_reads} reads (simple simulation, ~95% identity)")
+        print(f"  {species}: {n_reads} reads (simple simulation, "
+              f"{profile['label']}, ~{profile['simple_mean']*100:.1f}% identity)")
     
     # Shuffle
     combined = list(zip(all_reads, origins))
@@ -338,12 +405,14 @@ def main():
     parser.add_argument("--total-reads", type=int, default=50000, help="Total reads to simulate")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--simple", action="store_true", help="Use simple simulation (no badread needed)")
+    parser.add_argument("--platform", default="ont-r10", choices=sorted(PLATFORM_PROFILES),
+                        help="Sequencing platform accuracy profile to simulate")
     args = parser.parse_args()
     
     os.makedirs(args.outdir, exist_ok=True)
     
     print("=" * 65)
-    print("  EMU-ITS Synthetic Community Simulation")
+    print("  EMITS Synthetic Community Simulation")
     print("=" * 65)
     
     # 1. Parse UNITE
@@ -392,31 +461,47 @@ def main():
     
     # 5. Simulate reads
     print(f"\n[5] Simulating {args.total_reads} reads...")
+    print(f"\n  Platform profile: {PLATFORM_PROFILES[args.platform]['label']}")
     if args.simple:
-        fastq = simulate_simple(representatives, adjusted, args.total_reads, args.outdir, args.seed)
+        fastq = simulate_simple(representatives, adjusted, args.total_reads,
+                                args.outdir, args.seed, args.platform)
     else:
-        fastq = simulate_reads_badread(representatives, adjusted, args.total_reads, args.outdir, args.seed)
+        fastq = simulate_reads_badread(representatives, adjusted, args.total_reads,
+                                       args.outdir, args.seed, args.platform)
         if fastq is None:
             print("\n  Falling back to simple simulation...")
-            fastq = simulate_simple(representatives, adjusted, args.total_reads, args.outdir, args.seed)
+            fastq = simulate_simple(representatives, adjusted, args.total_reads,
+                                    args.outdir, args.seed, args.platform)
     
     # 6. Print next steps
     print(f"\n{'=' * 65}")
     print(f"  DONE! Next steps:")
     print(f"{'=' * 65}")
+    prof = PLATFORM_PROFILES[args.platform]
+    mm, mp, ep = prof["minimap2_preset"], prof["minimap2_p"], prof["emits_preset"]
     print(f"""
-  # Align against UNITE
-  minimap2 -c --secondary=yes -N 10 -p 0.9 -x map-ont \\
+  # Align against UNITE  ({mm}, matched to --platform {args.platform})
+  minimap2 -c --secondary=yes -N 10 -p {mp} -x {mm} \\
       {args.unite} \\
       {fastq} \\
       > {args.outdir}/sim_vs_unite.paf
 
-  # Run EMU-ITS
-  cargo run --release -- run \\
-      --preset ont-r10 \\
+  # Run EMITS with the preset for this platform
+  ./target/release/emits run \\
+      --preset {ep} \\
       --input {args.outdir}/sim_vs_unite.paf \\
-      --output {args.outdir}/emu_its_results.tsv \\
+      --output {args.outdir}/abundances_{ep}.tsv \\
       --compare --rank species
+    """)
+    if args.platform.startswith("pacbio"):
+        print(f"""  # Controls that make this a test of the PRESET, not just the tool:
+  ./target/release/emits run --preset ont-r10 \\
+      --input {args.outdir}/sim_vs_unite.paf \\
+      --output {args.outdir}/abundances_ont_preset.tsv --compare --rank species
+
+  ./target/release/emits run --preset pacbio-hifi --temperature 0.5 \\
+      --input {args.outdir}/sim_vs_unite.paf \\
+      --output {args.outdir}/abundances_hifi_temp05.tsv --compare --rank species
     """)
 
 

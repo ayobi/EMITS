@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
 """
-Generate publication figures for EMU-ITS simulated community validation.
+Generate publication figures for EMITS simulated community validation.
 
 Generates 4 figures:
-  fig_sim1: Estimated vs Expected abundance scatter (EM & Naive vs truth)
+  fig_sim1: Estimated vs Expected abundance scatter (EMITS, Naive, optionally EMU)
   fig_sim2: Within-genus resolution for all 6 multi-species genera
   fig_sim3: False positive suppression — Penicillium deep dive
-  fig_sim4: Per-species absolute error comparison (EM vs Naive)
+  fig_sim4: Per-species absolute error comparison
 
 Usage:
-    python generate_sim_figures.py \
-        --comparison results/simulated_community/emu_its_results_species_comparison.tsv \
-        --truth results/simulated_community/ground_truth.tsv \
+    # Two-way (EMITS vs Naive) — original behaviour
+    python generate_sim_figures.py \\
+        --comparison results/simulated_community/emu_its_results_species_comparison.tsv \\
+        --truth results/simulated_community/ground_truth.tsv \\
+        --outdir figures/simulated_community
+
+    # Three-way (EMITS vs Naive vs EMU) — new
+    python generate_sim_figures.py \\
+        --comparison results/simulated_community/emu_its_results_species_comparison.tsv \\
+        --truth results/simulated_community/ground_truth.tsv \\
+        --emu results/emu_synthetic/synthetic_emu_rel-abundance.tsv \\
         --outdir figures/simulated_community
 """
 
@@ -37,10 +45,10 @@ plt.rcParams.update({
     "savefig.bbox": "tight",
 })
 
-EM_COLOR = "#2563EB"
-NAIVE_COLOR = "#DC2626"
-TRUTH_COLOR = "#059669"
-FP_COLOR = "#F59E0B"
+EM_COLOR = "#2563EB"        # EMITS-EM, blue
+NAIVE_COLOR = "#DC2626"     # Naive, red
+EMU_COLOR = "#F59E0B"       # EMU, orange
+TRUTH_COLOR = "#059669"     # Truth, green
 
 
 def load_truth(path):
@@ -66,24 +74,59 @@ def load_comparison(path):
     return results
 
 
+def load_emu(path):
+    """Load EMU rel-abundance.tsv into a dict keyed on species name (with spaces)."""
+    emu = {}
+    with open(path) as f:
+        reader = csv.DictReader(f, delimiter="\t")
+        for row in reader:
+            tax_id = row["tax_id"]
+            if tax_id in ("unmapped", "mapped_filtered", "mapped_unclassified"):
+                continue
+            sp_field = row.get("species", "").strip()
+            if not sp_field:
+                continue
+            sp = sp_field.replace("_", " ").strip()
+            try:
+                ab = float(row["abundance"])
+            except (ValueError, KeyError):
+                continue
+            emu[sp] = emu.get(sp, 0.0) + ab
+    return emu
+
+
 # =====================================================================
 # FIG 1: Scatter — Estimated vs Expected
 # =====================================================================
-def fig_scatter(truth, results, outdir):
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5), sharey=True)
+def fig_scatter(truth, results, outdir, emu=None):
+    n_panels = 3 if emu is not None else 2
+    fig_width = 14 if emu is not None else 10
+    fig, axes = plt.subplots(1, n_panels, figsize=(fig_width, 4.5), sharey=True)
+    if n_panels == 1:
+        axes = [axes]
 
-    for ax, (method, color, label) in zip(axes, [
-        ("em", EM_COLOR, "EMU-ITS (EM)"),
+    panel_specs = [
+        ("em", EM_COLOR, "EMITS (EM)"),
         ("naive", NAIVE_COLOR, "Naive (best-hit)"),
-    ]):
+    ]
+    if emu is not None:
+        panel_specs.append(("emu", EMU_COLOR, "EMU"))
+
+    for ax, (method, color, label) in zip(axes, panel_specs):
         x_vals, y_vals, labels = [], [], []
         for sp, t in sorted(truth.items()):
-            match = [r for r in results if r["taxon"] == sp]
-            if match:
-                est = match[0][method]
+            if method == "emu":
+                est = emu.get(sp, 0.0)
                 x_vals.append(t * 100)
                 y_vals.append(est * 100)
                 labels.append(sp)
+            else:
+                match = [r for r in results if r["taxon"] == sp]
+                if match:
+                    est = match[0][method]
+                    x_vals.append(t * 100)
+                    y_vals.append(est * 100)
+                    labels.append(sp)
 
         ax.scatter(x_vals, y_vals, c=color, s=50, alpha=0.8, edgecolors="white", linewidth=0.5, zorder=3)
 
@@ -114,7 +157,7 @@ def fig_scatter(truth, results, outdir):
 
     axes[0].set_ylabel("Estimated abundance (%)")
 
-    fig.suptitle("Simulated 21-species ITS community: Estimated vs Expected", fontsize=13, fontweight="bold", y=1.02)
+    # R1 (revision, applied for consistency): suptitle removed.
     fig.tight_layout()
 
     for ext in ["png", "pdf"]:
@@ -126,7 +169,7 @@ def fig_scatter(truth, results, outdir):
 # =====================================================================
 # FIG 2: Within-genus resolution — grouped bar for all 6 genera
 # =====================================================================
-def fig_within_genus(truth, results, outdir):
+def fig_within_genus(truth, results, outdir, emu=None):
     genera = {
         "Aspergillus": ["Aspergillus niger", "Aspergillus tubingensis", "Aspergillus fumigatus"],
         "Fusarium": ["Fusarium oxysporum", "Fusarium solani", "Fusarium graminearum"],
@@ -146,6 +189,7 @@ def fig_within_genus(truth, results, outdir):
         truth_vals = []
         em_vals = []
         naive_vals = []
+        emu_vals = []
 
         for sp in species_list:
             parts = sp.split()
@@ -161,12 +205,24 @@ def fig_within_genus(truth, results, outdir):
                 em_vals.append(0)
                 naive_vals.append(0)
 
-        x = np.arange(len(short_names))
-        width = 0.25
+            if emu is not None:
+                emu_vals.append(emu.get(sp, 0.0) * 100)
 
-        bars_t = ax.bar(x - width, truth_vals, width, color=TRUTH_COLOR, alpha=0.7, label="Expected")
-        bars_e = ax.bar(x, em_vals, width, color=EM_COLOR, alpha=0.8, label="EM")
-        bars_n = ax.bar(x + width, naive_vals, width, color=NAIVE_COLOR, alpha=0.8, label="Naive")
+        x = np.arange(len(short_names))
+
+        if emu is not None:
+            # 4 bars per group: Truth, EMITS, Naive, EMU
+            width = 0.20
+            ax.bar(x - 1.5 * width, truth_vals, width, color=TRUTH_COLOR, alpha=0.7, label="Expected")
+            ax.bar(x - 0.5 * width, em_vals, width, color=EM_COLOR, alpha=0.85, label="EMITS")
+            ax.bar(x + 0.5 * width, naive_vals, width, color=NAIVE_COLOR, alpha=0.85, label="Naive")
+            ax.bar(x + 1.5 * width, emu_vals, width, color=EMU_COLOR, alpha=0.85, label="EMU")
+        else:
+            # Original 3-bar grouping
+            width = 0.25
+            ax.bar(x - width, truth_vals, width, color=TRUTH_COLOR, alpha=0.7, label="Expected")
+            ax.bar(x, em_vals, width, color=EM_COLOR, alpha=0.85, label="EMITS")
+            ax.bar(x + width, naive_vals, width, color=NAIVE_COLOR, alpha=0.85, label="Naive")
 
         ax.set_xticks(x)
         ax.set_xticklabels(short_names, rotation=25, ha="right", fontsize=8)
@@ -177,8 +233,7 @@ def fig_within_genus(truth, results, outdir):
         if idx == 0:
             ax.legend(fontsize=8, loc="upper right")
 
-    fig.suptitle("Within-genus species resolution: Expected vs EM vs Naive",
-                 fontsize=13, fontweight="bold", y=1.01)
+    # R1 (revision, applied for consistency): suptitle removed.
     fig.tight_layout()
 
     for ext in ["png", "pdf"]:
@@ -190,17 +245,32 @@ def fig_within_genus(truth, results, outdir):
 # =====================================================================
 # FIG 3: Penicillium false-positive deep dive
 # =====================================================================
-def fig_penicillium(truth, results, outdir):
-    # Get all Penicillium results
-    pen_results = [(r["taxon"], r["em"], r["naive"]) for r in results
-                   if r["taxon"].startswith("Penicillium") and (r["em"] > 0.0001 or r["naive"] > 0.0001)]
-    pen_results.sort(key=lambda x: -max(x[1], x[2]))
+def fig_penicillium(truth, results, outdir, emu=None):
+    # Build a unified species list with EMITS and (optionally) EMU
+    pen_data = {}
+    for r in results:
+        if r["taxon"].startswith("Penicillium ") and (r["em"] > 0.0001 or r["naive"] > 0.0001):
+            pen_data[r["taxon"]] = {"em": r["em"], "naive": r["naive"], "emu": 0.0}
+    if emu is not None:
+        for sp, ab in emu.items():
+            if sp.startswith("Penicillium ") and ab > 0.0001:
+                if sp not in pen_data:
+                    pen_data[sp] = {"em": 0.0, "naive": 0.0, "emu": ab}
+                else:
+                    pen_data[sp]["emu"] = ab
 
-    species = [p[0] for p in pen_results]
-    em_vals = [p[1] * 100 for p in pen_results]
-    naive_vals = [p[2] * 100 for p in pen_results]
+    # Sort by max abundance across all available methods
+    pen_sorted = sorted(
+        pen_data.keys(),
+        key=lambda t: -max(pen_data[t]["em"], pen_data[t]["naive"], pen_data[t]["emu"])
+    )
 
-    # Short names
+    species = pen_sorted
+    em_vals = [pen_data[t]["em"] * 100 for t in species]
+    naive_vals = [pen_data[t]["naive"] * 100 for t in species]
+    emu_vals = [pen_data[t]["emu"] * 100 for t in species] if emu is not None else None
+
+    # Short names with star for expected species
     short = []
     for sp in species:
         parts = sp.split()
@@ -209,36 +279,62 @@ def fig_penicillium(truth, results, outdir):
             s += " ★"
         short.append(s)
 
-    fig, ax = plt.subplots(figsize=(8, 5))
+    fig_height = max(5, len(short) * 0.45 + 1.5)
+    fig, ax = plt.subplots(figsize=(9, fig_height))
 
     y = np.arange(len(short))
-    height = 0.35
 
-    bars_n = ax.barh(y + height / 2, naive_vals, height, color=NAIVE_COLOR, alpha=0.8, label="Naive")
-    bars_e = ax.barh(y - height / 2, em_vals, height, color=EM_COLOR, alpha=0.8, label="EM")
+    if emu is not None:
+        height = 0.27
+        ax.barh(y - height, naive_vals, height, color=NAIVE_COLOR, alpha=0.85, label="Naive")
+        ax.barh(y, em_vals, height, color=EM_COLOR, alpha=0.85, label="EMITS")
+        ax.barh(y + height, emu_vals, height, color=EMU_COLOR, alpha=0.85, label="EMU")
+    else:
+        height = 0.35
+        ax.barh(y + height / 2, naive_vals, height, color=NAIVE_COLOR, alpha=0.85, label="Naive")
+        ax.barh(y - height / 2, em_vals, height, color=EM_COLOR, alpha=0.85, label="EMITS")
 
-    # Add expected abundance markers
+    # Add expected abundance markers (diamond)
     for i, sp in enumerate(species):
         if sp in truth:
             expected = truth[sp] * 100
-            ax.plot(expected, i, "D", color=TRUTH_COLOR, markersize=8, zorder=5, markeredgecolor="white", markeredgewidth=0.5)
+            ax.plot(expected, i, "D", color=TRUTH_COLOR, markersize=8, zorder=5,
+                    markeredgecolor="white", markeredgewidth=0.5)
 
     ax.set_yticks(y)
     ax.set_yticklabels(short, fontsize=9)
     ax.set_xlabel("Abundance (%)")
-    ax.set_title("Penicillium: EM reduces false positives by 34%\n(★ = expected species, ◆ = expected abundance)",
-                 fontweight="bold")
-    ax.legend(loc="lower center")
+
+    em_fp = sum(pen_data[t]["em"] * 100 for t in species if t not in truth)
+    naive_fp = sum(pen_data[t]["naive"] * 100 for t in species if t not in truth)
+    fp_red = (1 - em_fp / naive_fp) * 100 if naive_fp > 0 else 0
+
+    # R1 (revision): title removed; the marker key and the FP reduction now
+    # live in the LaTeX caption. Legend moved off "upper right", where it
+    # obscured the expected-abundance diamond, into the lower-left slot vacated
+    # by the removed annotation box.
+    ax.legend(loc="lower left")
     ax.invert_yaxis()
     ax.grid(axis="x", alpha=0.2)
 
-    # Add annotation
-    naive_fp = sum(p[2] * 100 for p in pen_results if p[0] not in truth)
-    em_fp = sum(p[1] * 100 for p in pen_results if p[0] not in truth)
-    ax.text(0.97, 0.03,
-            f"False positive total:\nEM: {em_fp:.2f}%\nNaive: {naive_fp:.2f}%",
-            transform=ax.transAxes, fontsize=9, ha="right", va="bottom",
-            bbox=dict(boxstyle="round,pad=0.4", facecolor="lightyellow", alpha=0.9))
+    # R1 (revision): in-panel annotation box removed. Totals are printed so they
+    # can be quoted in the caption. Both the plotted subset and the whole-genus
+    # totals are reported, because the caption must state which it is using.
+    emu_fp = (sum(pen_data[t]["emu"] * 100 for t in species if t not in truth)
+              if emu is not None else None)
+    print(f"[Fig4] PLOTTED FP species (n={sum(1 for t in species if t not in truth)}): "
+          f"EMITS={em_fp:.2f}%  Naive={naive_fp:.2f}%"
+          + (f"  EMU={emu_fp:.2f}%" if emu_fp is not None else "")
+          + f"   -> EMITS reduction vs naive {fp_red:.1f}%")
+    all_em = sum(v["em"] * 100 for t, v in pen_data.items() if t not in truth)
+    all_nv = sum(v["naive"] * 100 for t, v in pen_data.items() if t not in truth)
+    all_emu = (sum(v["emu"] * 100 for t, v in pen_data.items() if t not in truth)
+               if emu is not None else None)
+    all_red = (1 - all_em / all_nv) * 100 if all_nv > 0 else 0
+    print(f"[Fig4] ALL unexpected Penicillium (n={sum(1 for t in pen_data if t not in truth)}): "
+          f"EMITS={all_em:.2f}%  Naive={all_nv:.2f}%"
+          + (f"  EMU={all_emu:.2f}%" if all_emu is not None else "")
+          + f"   -> EMITS reduction vs naive {all_red:.1f}%")
 
     fig.tight_layout()
     for ext in ["png", "pdf"]:
@@ -248,13 +344,14 @@ def fig_penicillium(truth, results, outdir):
 
 
 # =====================================================================
-# FIG 4: Per-species absolute error (EM vs Naive)
+# FIG 4: Per-species absolute error
 # =====================================================================
-def fig_error_comparison(truth, results, outdir):
+def fig_error_comparison(truth, results, outdir, emu=None):
     species_list = sorted(truth.keys(), key=lambda x: -truth[x])
 
     em_errors = []
     naive_errors = []
+    emu_errors = []
     short_names = []
 
     for sp in species_list:
@@ -264,47 +361,52 @@ def fig_error_comparison(truth, results, outdir):
             nv_err = abs(match[0]["naive"] - truth[sp]) * 100
             em_errors.append(em_err)
             naive_errors.append(nv_err)
+            if emu is not None:
+                emu_err = abs(emu.get(sp, 0.0) - truth[sp]) * 100
+                emu_errors.append(emu_err)
             parts = sp.split()
             short_names.append(f"{parts[0][0]}. {parts[1]}" if len(parts) > 1 else sp)
 
-    # Also add total false positive error
+    # Total false positive error
     fp_em = sum(r["em"] for r in results if r["taxon"] not in truth) * 100
     fp_naive = sum(r["naive"] for r in results if r["taxon"] not in truth) * 100
     em_errors.append(fp_em)
     naive_errors.append(fp_naive)
+    if emu is not None:
+        fp_emu = sum(ab for sp, ab in emu.items() if sp not in truth) * 100
+        emu_errors.append(fp_emu)
     short_names.append("False positives\n(all spurious)")
 
-    fig, ax = plt.subplots(figsize=(10, 5))
+    fig, ax = plt.subplots(figsize=(11, 5))
 
     x = np.arange(len(short_names))
-    width = 0.35
 
-    bars_e = ax.bar(x - width / 2, em_errors, width, color=EM_COLOR, alpha=0.8, label="EM")
-    bars_n = ax.bar(x + width / 2, naive_errors, width, color=NAIVE_COLOR, alpha=0.8, label="Naive")
-
-    # Highlight where EM is notably better
-    for i in range(len(em_errors)):
-        if naive_errors[i] > em_errors[i] * 1.2:
-            ax.annotate("", xy=(i - width / 2, em_errors[i]),
-                        xytext=(i + width / 2, naive_errors[i]),
-                        arrowprops=dict(arrowstyle="<-", color=TRUTH_COLOR, lw=1.5))
+    if emu is not None:
+        width = 0.27
+        ax.bar(x - width, em_errors, width, color=EM_COLOR, alpha=0.85, label="EMITS")
+        ax.bar(x, naive_errors, width, color=NAIVE_COLOR, alpha=0.85, label="Naive")
+        ax.bar(x + width, emu_errors, width, color=EMU_COLOR, alpha=0.85, label="EMU")
+    else:
+        width = 0.35
+        ax.bar(x - width / 2, em_errors, width, color=EM_COLOR, alpha=0.85, label="EMITS")
+        ax.bar(x + width / 2, naive_errors, width, color=NAIVE_COLOR, alpha=0.85, label="Naive")
 
     ax.set_xticks(x)
     ax.set_xticklabels(short_names, rotation=45, ha="right", fontsize=8)
     ax.set_ylabel("Absolute error (%)")
-    ax.set_title("Per-species estimation error: EM vs Naive\n(lower is better)",
-                 fontweight="bold")
+    # R1 (revision): title removed; content moved to the LaTeX caption.
     ax.legend()
     ax.grid(axis="y", alpha=0.2)
 
-    # Summary annotation
     total_em = sum(em_errors)
     total_naive = sum(naive_errors)
-    improvement = (1 - total_em / total_naive) * 100
-    ax.text(0.85, 0.97,
-            f"Total L1: EM={total_em:.2f}%  Naive={total_naive:.2f}%\nEM improvement: {improvement:.1f}%",
-            transform=ax.transAxes, fontsize=9, ha="right", va="top",
-            bbox=dict(boxstyle="round,pad=0.4", facecolor="lightyellow", alpha=0.9))
+    # R1 (revision): in-panel annotation box removed; values printed for the caption.
+    summary = f"[Fig5] Total L1 -- EMITS={total_em:.2f}%  Naive={total_naive:.2f}%"
+    if emu is not None:
+        total_emu = sum(emu_errors)
+        summary += f"  EMU={total_emu:.2f}%"
+    summary += f"   (EMITS improvement vs naive: {(1 - total_em / total_naive) * 100:.1f}%)"
+    print(summary)
 
     fig.tight_layout()
     for ext in ["png", "pdf"]:
@@ -318,8 +420,9 @@ def fig_error_comparison(truth, results, outdir):
 # =====================================================================
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--comparison", required=True, help="Species comparison TSV from EMU-ITS")
+    parser.add_argument("--comparison", required=True, help="Species comparison TSV from EMITS")
     parser.add_argument("--truth", required=True, help="Ground truth TSV")
+    parser.add_argument("--emu", default=None, help="(Optional) EMU rel-abundance.tsv")
     parser.add_argument("--outdir", default="figures/simulated_community", help="Output directory")
     args = parser.parse_args()
 
@@ -334,14 +437,18 @@ def main():
     print(f"  Ground truth: {len(truth)} species")
     print(f"  Results: {len(results)} species")
 
+    emu = None
+    if args.emu:
+        emu = load_emu(args.emu)
+        print(f"  EMU: {len(emu)} species")
+
     print()
-    fig_scatter(truth, results, args.outdir)
-    fig_within_genus(truth, results, args.outdir)
-    fig_penicillium(truth, results, args.outdir)
-    fig_error_comparison(truth, results, args.outdir)
+    fig_scatter(truth, results, args.outdir, emu=emu)
+    fig_within_genus(truth, results, args.outdir, emu=emu)
+    fig_penicillium(truth, results, args.outdir, emu=emu)
+    fig_error_comparison(truth, results, args.outdir, emu=emu)
 
     print(f"\n  All figures saved to {args.outdir}/")
-    print(f"  Formats: PNG (300 dpi) + PDF (vector)")
 
 
 if __name__ == "__main__":

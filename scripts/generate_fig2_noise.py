@@ -3,7 +3,7 @@
 Generate Figure 2: L1 error vs alignment score noise level.
 
 This script can work in two modes:
-  1. Parse the output of `emu-its simulate --all` (pipe or file)
+  1. Parse the output of `emits simulate --all` (pipe or file)
   2. Use hardcoded values from the Rust simulation results
 
 Usage:
@@ -32,7 +32,7 @@ import numpy as np
 
 
 def parse_simulation_output(text):
-    """Parse Experiment 6 noise sensitivity table from emu-its simulate --all output."""
+    """Parse Experiment 6 noise sensitivity table from emits simulate --all output."""
     noise_levels = []
     naive_l1 = []
     em_l1 = []
@@ -82,7 +82,7 @@ def generate_figure(noise, naive_l1, em_l1, wrong_pct=None, outdir='.'):
     ax1.plot(noise, naive_l1, 'o-', color='#E24B4A', linewidth=2, markersize=6,
              label='Naive (best-hit)', zorder=3)
     ax1.plot(noise, em_l1, 's-', color='#378ADD', linewidth=2, markersize=6,
-             label='EMU-ITS (EM)', zorder=3)
+             label='EMITS (EM)', zorder=3)
 
     # Fill between to emphasize the gap
     ax1.fill_between(noise, em_l1, naive_l1, alpha=0.08, color='#E24B4A', zorder=1)
@@ -133,10 +133,10 @@ def generate_figure(noise, naive_l1, em_l1, wrong_pct=None, outdir='.'):
     ax1.legend(fontsize=11, loc='upper left', framealpha=0.9)
     ax1.grid(True, alpha=0.15)
 
-    # Title
-    ax1.set_title('EM robustness to alignment score noise\n'
-                   '(simulated 3-species community, 50% cross-mapping)',
-                   fontsize=12, fontweight='bold', pad=30 if wrong_pct else 10)
+    # R1 (revision): figure title removed; content moved to the LaTeX caption.
+    # Extra top padding retained only for the secondary x-axis labels.
+    if wrong_pct:
+        ax1.set_title('', pad=30)
 
     plt.tight_layout()
 

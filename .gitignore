@@ -39,3 +39,6 @@ venv/
 
 # Figures (regenerable from scripts)
 figures/*.png
+emu/
+*.zip
+.DS_Store
