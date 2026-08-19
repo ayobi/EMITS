@@ -2,15 +2,15 @@
 set -euo pipefail
 
 # ============================================================================
-# EMU-ITS Real Data Validation Pipeline
+# EMITS Real Data Validation Pipeline
 # ============================================================================
 # Downloads ONT fungal ITS mock community data and UNITE database,
-# runs minimap2 alignment, then tests EMU-ITS against known composition.
+# runs minimap2 alignment, then tests EMITS against known composition.
 #
 # Requirements:
 #   - minimap2 (conda install -c bioconda minimap2)
 #   - aws CLI (conda install -c conda-forge awscli) OR just use curl/wget
-#   - emu-its (cargo build --release, binary at target/release/emu-its)
+#   - emits (cargo build --release, binary at target/release/emits)
 #   - ~10 GB free disk space
 #
 # Usage:
@@ -22,7 +22,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 DATA_DIR="${PROJECT_DIR}/data"
 RESULTS_DIR="${PROJECT_DIR}/results"
-EMU_ITS="${PROJECT_DIR}/target/release/emu-its"
+EMITS="${PROJECT_DIR}/target/release/emits"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -43,8 +43,8 @@ if ! command -v minimap2 &> /dev/null; then
     exit 1
 fi
 
-if [ ! -f "$EMU_ITS" ]; then
-    log "Building emu-its..."
+if [ ! -f "$EMITS" ]; then
+    log "Building emits..."
     cd "$PROJECT_DIR" && cargo build --release
 fi
 
@@ -187,20 +187,20 @@ else
     log "PAF file already present at ${PAF_FILE}"
 fi
 
-# ── Step 6: Run EMU-ITS ─────────────────────────────────────────────
+# ── Step 6: Run EMITS ─────────────────────────────────────────────
 EM_OUTPUT="${RESULTS_DIR}/emu_its_abundances.tsv"
 NAIVE_OUTPUT="${RESULTS_DIR}/naive_abundances.tsv"
 
-log "Running EMU-ITS..."
+log "Running EMITS..."
 
 # Run with comparison mode
-"$EMU_ITS" run \
+"$EMITS" run \
     --input "$PAF_FILE" \
     --output "$EM_OUTPUT" \
     --min-identity 0.8 \
     --compare
 
-log "EMU-ITS complete!"
+log "EMITS complete!"
 
 # ── Step 7: Also run naive counting for comparison ──────────────────
 # (The --compare flag already generates this, but let's be explicit)
@@ -208,7 +208,7 @@ log "EMU-ITS complete!"
 # ── Step 8: Print summary ───────────────────────────────────────────
 echo ""
 echo "============================================================================"
-echo "  EMU-ITS Real Data Validation — Results Summary"
+echo "  EMITS Real Data Validation — Results Summary"
 echo "============================================================================"
 echo ""
 echo "  Dataset:  ONT Fungal ITS Mock Community (ATCC Mycobiome gDNA Mix)"

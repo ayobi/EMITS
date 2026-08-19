@@ -118,7 +118,14 @@ impl PresetParams {
                 min_identity: 0.80,
                 min_mapq: 0,
                 temperature: 0.5,
-                max_iterations: 100,
+                // Raised from 100, which was truncating EM before convergence on
+                // both published datasets: the simulated 21-species community
+                // needs 232 iterations and the ATCC ONT mock 175. Truncation was
+                // conservative rather than wrong -- on the mock, estimates at 100
+                // iterations already matched the converged values to within 0.007
+                // percentage points -- but on the simulated community it left L1
+                // at 7.48% where convergence gives 7.30%.
+                max_iterations: 500,
                 convergence_threshold: 1e-6,
                 min_abundance: 1e-7,
                 minimap2_preset: "map-ont",
@@ -133,7 +140,11 @@ impl PresetParams {
                 min_identity: 0.70,
                 min_mapq: 0,
                 temperature: 0.8,
-                max_iterations: 150,
+                // Raised for the same reason as ont-r10. R9 admits more
+                // candidates at a lower identity threshold and uses a higher
+                // temperature, both of which slow convergence, so it needs at
+                // least as much headroom. Not measured directly.
+                max_iterations: 500,
                 convergence_threshold: 1e-6,
                 min_abundance: 1e-7,
                 minimap2_preset: "map-ont",
@@ -142,13 +153,34 @@ impl PresetParams {
             },
             Platform::PacBioHifi => PresetParams {
                 platform,
-                // HiFi: ~Q30+, very accurate reads
-                // Strict identity threshold since reads are high quality
-                // Low temperature = more sensitive to score differences
+                // HiFi: ~Q30+, very accurate reads.
+                // Strict identity threshold since reads are high quality.
+                // Low temperature = more sensitive to score differences.
+                //
+                // min_mapq MUST stay 0. minimap2 assigns MAPQ 0 to reads with
+                // multiple equally-scoring alignments -- precisely the ambiguous
+                // reads EM exists to resolve. An earlier value of 5 discarded
+                // them before EM saw them, collapsing the candidate set from 187
+                // taxa to 31 and driving the EM improvement over naive counting
+                // to exactly zero (L1 6.43% vs 5.03% once corrected). See
+                // scripts/sweep_hifi_preset.py.
                 min_identity: 0.95,
-                min_mapq: 5,
+                min_mapq: 0,
                 temperature: 0.15,
-                max_iterations: 100,
+                // Raised from 100. With min_mapq corrected to 0 the candidate
+                // set grows to ~170 taxa and EM needs 152 iterations to reach
+                // convergence_threshold on the simulated HiFi community; at 100
+                // it terminated early with delta 3.67e-6.
+                //
+                // Set well above the observed 152 rather than just above it.
+                // The cost of a high ceiling is bounded -- EM stops as soon as
+                // it converges -- whereas the cost of a low one is a silently
+                // truncated estimate, which is exactly the failure this preset
+                // shipped with. Iteration count is also sensitive to
+                // temperature: at temperature 0.5 the same data needs 376.
+                // Real communities are more complex than this simulation, so
+                // leave margin.
+                max_iterations: 500,
                 convergence_threshold: 1e-7,
                 min_abundance: 1e-8,
                 minimap2_preset: "map-hifi",
@@ -158,11 +190,19 @@ impl PresetParams {
             Platform::OntDuplex => PresetParams {
                 platform,
                 // Duplex: ~Q30, comparable to HiFi but ONT error profile
-                // (still has some homopolymer issues unlike HiFi)
+                // (still has some homopolymer issues unlike HiFi).
+                //
+                // min_mapq set to 0 for the same reason as pacbio-hifi: MAPQ 0
+                // marks the multi-mapping reads EM is designed to resolve.
+                // Not benchmarked directly -- corrected by analogy with the
+                // PacBio HiFi result, since both are high-accuracy presets that
+                // shared the same mistuning.
                 min_identity: 0.90,
-                min_mapq: 5,
+                min_mapq: 0,
                 temperature: 0.2,
-                max_iterations: 100,
+                // Raised for the same reason as the other presets. Not measured
+                // directly; corrected by analogy.
+                max_iterations: 500,
                 convergence_threshold: 1e-7,
                 min_abundance: 1e-8,
                 minimap2_preset: "map-ont",
@@ -248,6 +288,51 @@ mod tests {
         assert!(hifi.min_identity > ont.min_identity);
         // HiFi should have lower temperature (more score-sensitive)
         assert!(hifi.temperature < ont.temperature);
+    }
+
+    /// Regression guard. `max_iterations` is a safety valve, not a stopping
+    /// rule -- `convergence_threshold` should be what halts EM. Observed
+    /// requirements: 232 iterations (simulated community, ont-r10), 175 (ATCC
+    /// ONT mock, ont-r10), 376 (HiFi at temperature 0.5).
+    #[test]
+    fn test_iteration_ceilings_exceed_observed_requirements() {
+        const OBSERVED_MAX: usize = 376;
+        for platform in [
+            Platform::OntR10,
+            Platform::OntR9,
+            Platform::PacBioHifi,
+            Platform::OntDuplex,
+        ] {
+            let p = PresetParams::for_platform(platform);
+            assert!(
+                p.max_iterations > OBSERVED_MAX,
+                "{platform} allows only {} iterations; EM has been observed to \
+                 need {OBSERVED_MAX}, so this ceiling would truncate before \
+                 convergence and silently return a conservative estimate",
+                p.max_iterations
+            );
+        }
+    }
+
+    /// Regression guard. Filtering on MAPQ removes multi-mapping reads, which
+    /// are the reads EM is for. No preset may filter them out.
+    #[test]
+    fn test_no_preset_filters_multimapping_reads() {
+        for platform in [
+            Platform::OntR10,
+            Platform::OntR9,
+            Platform::PacBioHifi,
+            Platform::OntDuplex,
+        ] {
+            let p = PresetParams::for_platform(platform);
+            assert_eq!(
+                p.min_mapq, 0,
+                "{platform} sets min_mapq={}; MAPQ 0 marks the ambiguous \
+                 alignments EM is designed to resolve, so filtering on it \
+                 discards exactly the signal EMITS depends on",
+                p.min_mapq
+            );
+        }
     }
 
     #[test]
