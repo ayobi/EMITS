@@ -69,10 +69,15 @@ enum Commands {
         compare: bool,
 
         /// Taxonomic rank for aggregated output [species, genus, family, order, class, phylum]
-        /// Collapses multiple UNITE accessions into one row per taxon at this rank.
+        /// Collapses multiple database accessions into one row per taxon at this rank.
         /// Raw per-accession output is always written; aggregated output is additional.
         #[arg(long, default_value = "species")]
         rank: String,
+
+        /// Reference database header format [unite, eukaryome, auto]
+        /// 'auto' infers the format from the alignment target names.
+        #[arg(long, default_value = "auto")]
+        db_format: String,
     },
 
     /// Show details of a sequencing platform preset
@@ -92,6 +97,24 @@ enum Commands {
         /// Reads file path (for minimap2 command output)
         #[arg(long, default_value = "reads.fastq")]
         reads: String,
+    },
+
+    /// Inspect how reference headers are parsed, to verify database format
+    /// support before running an analysis.
+    ///
+    /// Reads FASTA headers on stdin (with or without a leading '>') and prints
+    /// the taxonomy extracted from each. Use this to confirm that a new
+    /// database release still parses correctly:
+    ///
+    ///   grep '^>' General_EUK_ITS_v2.0.fasta | head -20 | emits check-db --db-format eukaryome
+    CheckDb {
+        /// Reference database header format [unite, eukaryome, auto]
+        #[arg(long, default_value = "auto")]
+        db_format: String,
+
+        /// Print only the summary, not each parsed header
+        #[arg(long)]
+        quiet: bool,
     },
 
     /// Run simulation experiments to validate EM vs naive counting
@@ -131,6 +154,7 @@ fn main() -> Result<()> {
             temperature,
             compare,
             rank,
+            db_format,
         } => {
             // Resolve taxonomic rank
             let tax_rank = taxonomy::TaxRank::from_str(&rank).unwrap_or_else(|| {
@@ -142,6 +166,22 @@ fn main() -> Result<()> {
                 eprintln!("Using default: species");
                 taxonomy::TaxRank::Species
             });
+            // Resolve reference database header format
+            let requested_db_format = if db_format.eq_ignore_ascii_case("auto") {
+                None
+            } else {
+                Some(
+                    taxonomy::DbFormat::from_str(&db_format).unwrap_or_else(|| {
+                        eprintln!(
+                            "Unknown database format '{}'. Available: {}",
+                            db_format,
+                            taxonomy::DbFormat::available()
+                        );
+                        eprintln!("Falling back to automatic detection.");
+                        taxonomy::DbFormat::Unite
+                    }),
+                )
+            };
             // Resolve platform preset
             let platform = preset::Platform::from_str(&preset).unwrap_or_else(|| {
                 eprintln!(
@@ -237,7 +277,15 @@ fn main() -> Result<()> {
             log::info!("Wrote raw EM abundance estimates to {}", output);
 
             // Write aggregated output
-            let em_agg = taxonomy::aggregate_abundances(&result.abundances, tax_rank);
+            let resolved_db_format = requested_db_format.unwrap_or_else(|| {
+                let detected = taxonomy::DbFormat::detect_many(
+                    result.abundances.keys().map(|s| s.as_str()),
+                );
+                eprintln!("Detected reference database format: {:?}", detected);
+                detected
+            });
+            let em_agg =
+                taxonomy::aggregate_abundances(&result.abundances, tax_rank, resolved_db_format);
             let agg_path = output.replace(".tsv", &format!("_{}.tsv", rank));
             let mut agg_writer = BufWriter::new(File::create(&agg_path)?);
             output::write_aggregated_tsv(&mut agg_writer, &em_agg, total_reads)?;
@@ -263,7 +311,8 @@ fn main() -> Result<()> {
                 log::info!("Wrote raw comparison to {}", comparison_path);
 
                 // Aggregated comparison
-                let naive_agg = taxonomy::aggregate_abundances(&naive, tax_rank);
+                let naive_agg =
+                    taxonomy::aggregate_abundances(&naive, tax_rank, resolved_db_format);
                 let agg_cmp_path = output.replace(".tsv", &format!("_{}_comparison.tsv", rank));
                 let mut agg_cmp_writer = BufWriter::new(File::create(&agg_cmp_path)?);
                 output::write_aggregated_comparison_tsv(
@@ -328,6 +377,87 @@ fn main() -> Result<()> {
                 println!();
                 params.print_summary();
                 println!();
+            }
+        }
+
+        Commands::CheckDb { db_format, quiet } => {
+            use std::io::BufRead;
+
+            let headers: Vec<String> = std::io::stdin()
+                .lock()
+                .lines()
+                .filter_map(|l| l.ok())
+                .map(|l| l.trim().trim_start_matches('>').to_string())
+                .filter(|l| !l.is_empty())
+                .collect();
+
+            if headers.is_empty() {
+                eprintln!("No headers on stdin. Example:");
+                eprintln!("  grep '^>' db.fasta | head -20 | emits check-db");
+                std::process::exit(2);
+            }
+
+            let format = if db_format.eq_ignore_ascii_case("auto") {
+                let d = taxonomy::DbFormat::detect_many(headers.iter().map(|s| s.as_str()));
+                println!("Detected format: {:?}", d);
+                d
+            } else {
+                taxonomy::DbFormat::from_str(&db_format).unwrap_or_else(|| {
+                    eprintln!(
+                        "Unknown database format '{}'. Available: {}",
+                        db_format,
+                        taxonomy::DbFormat::available()
+                    );
+                    std::process::exit(2);
+                })
+            };
+
+            let mut no_species = 0usize;
+            let mut no_genus = 0usize;
+            let mut unparsed = 0usize;
+
+            for h in &headers {
+                if format == taxonomy::DbFormat::Eukaryome
+                    && taxonomy::Taxonomy::try_from_eukaryome_header(h).is_none()
+                {
+                    unparsed += 1;
+                    if !quiet {
+                        println!("UNPARSED  {}", h);
+                    }
+                    continue;
+                }
+                let tax = taxonomy::Taxonomy::from_header(h, format);
+                if tax.species.is_empty() {
+                    no_species += 1;
+                }
+                if tax.genus.is_empty() {
+                    no_genus += 1;
+                }
+                if !quiet {
+                    println!(
+                        "accession={:<16} marker={:<8} genus={:<24} species={}",
+                        if tax.accession.is_empty() { "-" } else { &tax.accession },
+                        if tax.marker.is_empty() { "-" } else { &tax.marker },
+                        if tax.genus.is_empty() { "-" } else { &tax.genus },
+                        if tax.species.is_empty() { "-" } else { &tax.species },
+                    );
+                }
+            }
+
+            let n = headers.len();
+            println!();
+            println!("Headers read:      {}", n);
+            println!("Unparsed:          {}", unparsed);
+            println!("Missing genus:     {}", no_genus);
+            println!("Missing species:   {}", no_species);
+
+            // A wholesale parsing failure almost always means the header layout
+            // changed. Exit non-zero so this is catchable in a pipeline.
+            if unparsed > 0 || no_genus == n {
+                eprintln!();
+                eprintln!("Header layout does not look like {:?}. Check the release notes", format);
+                eprintln!("for a format change, or pass --db-format explicitly.");
+                std::process::exit(1);
             }
         }
 
