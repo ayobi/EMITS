@@ -170,17 +170,15 @@ fn main() -> Result<()> {
             let requested_db_format = if db_format.eq_ignore_ascii_case("auto") {
                 None
             } else {
-                Some(
-                    taxonomy::DbFormat::from_str(&db_format).unwrap_or_else(|| {
-                        eprintln!(
-                            "Unknown database format '{}'. Available: {}",
-                            db_format,
-                            taxonomy::DbFormat::available()
-                        );
-                        eprintln!("Falling back to automatic detection.");
-                        taxonomy::DbFormat::Unite
-                    }),
-                )
+                Some(taxonomy::DbFormat::from_str(&db_format).unwrap_or_else(|| {
+                    eprintln!(
+                        "Unknown database format '{}'. Available: {}",
+                        db_format,
+                        taxonomy::DbFormat::available()
+                    );
+                    eprintln!("Falling back to automatic detection.");
+                    taxonomy::DbFormat::Unite
+                }))
             };
             // Resolve platform preset
             let platform = preset::Platform::from_str(&preset).unwrap_or_else(|| {
@@ -278,9 +276,8 @@ fn main() -> Result<()> {
 
             // Write aggregated output
             let resolved_db_format = requested_db_format.unwrap_or_else(|| {
-                let detected = taxonomy::DbFormat::detect_many(
-                    result.abundances.keys().map(|s| s.as_str()),
-                );
+                let detected =
+                    taxonomy::DbFormat::detect_many(result.abundances.keys().map(|s| s.as_str()));
                 eprintln!("Detected reference database format: {:?}", detected);
                 detected
             });
@@ -383,10 +380,12 @@ fn main() -> Result<()> {
         Commands::CheckDb { db_format, quiet } => {
             use std::io::BufRead;
 
+            // map_while, not filter_map: filter_map would skip read errors and
+            // keep polling, looping forever if stdin repeatedly errors.
             let headers: Vec<String> = std::io::stdin()
                 .lock()
                 .lines()
-                .filter_map(|l| l.ok())
+                .map_while(Result::ok)
                 .map(|l| l.trim().trim_start_matches('>').to_string())
                 .filter(|l| !l.is_empty())
                 .collect();
@@ -436,10 +435,26 @@ fn main() -> Result<()> {
                 if !quiet {
                     println!(
                         "accession={:<16} marker={:<8} genus={:<24} species={}",
-                        if tax.accession.is_empty() { "-" } else { &tax.accession },
-                        if tax.marker.is_empty() { "-" } else { &tax.marker },
-                        if tax.genus.is_empty() { "-" } else { &tax.genus },
-                        if tax.species.is_empty() { "-" } else { &tax.species },
+                        if tax.accession.is_empty() {
+                            "-"
+                        } else {
+                            &tax.accession
+                        },
+                        if tax.marker.is_empty() {
+                            "-"
+                        } else {
+                            &tax.marker
+                        },
+                        if tax.genus.is_empty() {
+                            "-"
+                        } else {
+                            &tax.genus
+                        },
+                        if tax.species.is_empty() {
+                            "-"
+                        } else {
+                            &tax.species
+                        },
                     );
                 }
             }
@@ -455,7 +470,10 @@ fn main() -> Result<()> {
             // changed. Exit non-zero so this is catchable in a pipeline.
             if unparsed > 0 || no_genus == n {
                 eprintln!();
-                eprintln!("Header layout does not look like {:?}. Check the release notes", format);
+                eprintln!(
+                    "Header layout does not look like {:?}. Check the release notes",
+                    format
+                );
                 eprintln!("for a format change, or pass --db-format explicitly.");
                 std::process::exit(1);
             }

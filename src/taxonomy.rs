@@ -494,8 +494,14 @@ mod tests {
 
         assert_eq!(DbFormat::detect(unite), DbFormat::Unite);
         assert_eq!(DbFormat::detect(euk), DbFormat::Eukaryome);
-        assert_eq!(DbFormat::detect_many(vec![euk, euk, unite]), DbFormat::Eukaryome);
-        assert_eq!(DbFormat::detect_many(vec![unite, unite, euk]), DbFormat::Unite);
+        assert_eq!(
+            DbFormat::detect_many(vec![euk, euk, unite]),
+            DbFormat::Eukaryome
+        );
+        assert_eq!(
+            DbFormat::detect_many(vec![unite, unite, euk]),
+            DbFormat::Unite
+        );
         // Ambiguous input falls back to UNITE (prior behaviour).
         assert_eq!(DbFormat::detect("something_odd"), DbFormat::Unite);
     }
